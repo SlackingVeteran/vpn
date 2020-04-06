@@ -8,8 +8,8 @@
 #include <sys/ioctl.h>
 
 #define BUFF_SIZE 2000
-#define PORT_NUMBER 55555
-#define SERVER_IP "127.0.0.1" 
+#define PORT_NUMBER 4433
+#define SERVER_IP "127.0.0.1"
 struct sockaddr_in peerAddr;
 
 int createTunDevice() {
@@ -17,15 +17,15 @@ int createTunDevice() {
    struct ifreq ifr;
    memset(&ifr, 0, sizeof(ifr));
 
-   ifr.ifr_flags = IFF_TUN | IFF_NO_PI;  
+   ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
 
    tunfd = open("/dev/net/tun", O_RDWR);
-   ioctl(tunfd, TUNSETIFF, &ifr);       
+   ioctl(tunfd, TUNSETIFF, &ifr);
 
    return tunfd;
 }
 
-int connectToUDPServer(){
+int connectToTCPServer(){
     int sockfd;
     char *hello="Hello";
 
@@ -34,11 +34,21 @@ int connectToUDPServer(){
     peerAddr.sin_port = htons(PORT_NUMBER);
     peerAddr.sin_addr.s_addr = inet_addr(SERVER_IP);
 
-    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+    {
+        printf("\n Socket creation error \n");
+        return -1;
+    }
 
-    // Send a hello message to "connect" with the VPN server
-    sendto(sockfd, hello, strlen(hello), 0,
-                (struct sockaddr *) &peerAddr, sizeof(peerAddr));
+    // connect() is used in TCP to attempt to make a connection to socket
+    if (connect(sockfd, (struct sockaddr *)&peerAddr, sizeof(peerAddr)) < 0)
+    {
+        printf("\nConnection Failed \n");
+        return -1;
+    }
+
+    // send() is used instead of sendto() for tcp
+    send(sockfd, hello, strlen(hello), 0);
 
     return sockfd;
 }
@@ -53,8 +63,8 @@ void tunSelected(int tunfd, int sockfd){
 
     bzero(buff, BUFF_SIZE);
     len = read(tunfd, buff, BUFF_SIZE);
-    sendto(sockfd, buff, len, 0, (struct sockaddr *) &peerAddr,
-                    sizeof(peerAddr));
+
+    send(sockfd, buff, len, 0);
 }
 
 void socketSelected (int tunfd, int sockfd){
@@ -64,7 +74,7 @@ void socketSelected (int tunfd, int sockfd){
     printf("Got a packet from the tunnel\n");
 
     bzero(buff, BUFF_SIZE);
-    len = recvfrom(sockfd, buff, BUFF_SIZE, 0, NULL, NULL);
+    len = read(sockfd, buff, BUFF_SIZE);
     write(tunfd, buff, len);
 
 }
@@ -72,7 +82,7 @@ int main (int argc, char * argv[]) {
    int tunfd, sockfd;
 
    tunfd  = createTunDevice();
-   sockfd = connectToUDPServer();
+   sockfd = connectToTCPServer();
 
    // Enter the main loop
    while (1) {
@@ -87,4 +97,3 @@ int main (int argc, char * argv[]) {
      if (FD_ISSET(sockfd, &readFDSet)) socketSelected(tunfd, sockfd);
   }
 }
- 
